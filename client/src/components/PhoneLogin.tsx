@@ -110,7 +110,46 @@ export function PhoneLogin({ onLoginSuccess }: PhoneLoginProps) {
       });
     } catch (err: any) {
       console.error("Error verifying OTP:", err);
-      setError("Invalid OTP. Please try again.");
+      
+      if (err.code === 'auth/invalid-verification-code') {
+        setError("Invalid OTP. Please check and try again.");
+      } else if (err.code === 'auth/code-expired') {
+        setError("OTP has expired. Please request a new one.");
+      } else {
+        setError("Verification failed. Please try again.");
+      }
+      
+      setOtp("");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setError("");
+    setOtp("");
+    setLoading(true);
+    
+    try {
+      if ((window as any).recaptchaVerifier) {
+        (window as any).recaptchaVerifier.clear();
+        (window as any).recaptchaVerifier = null;
+      }
+      
+      setupRecaptcha();
+      const appVerifier = (window as any).recaptchaVerifier;
+      const phoneNumber = `+91${phone}`;
+      
+      const confirmation = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+      setConfirmationResult(confirmation);
+      
+      toast({
+        title: "OTP Resent",
+        description: `New verification code sent to +91 ${phone}`,
+      });
+    } catch (err: any) {
+      console.error("Error resending OTP:", err);
+      setError("Failed to resend OTP. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -220,20 +259,32 @@ export function PhoneLogin({ onLoginSuccess }: PhoneLoginProps) {
                       "Verify & Login"
                     )}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="w-full"
-                    onClick={() => {
-                      setStep("phone");
-                      setOtp("");
-                      setError("");
-                    }}
-                    disabled={loading}
-                    data-testid="button-change-number"
-                  >
-                    Change Number
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={handleResendOtp}
+                      disabled={loading}
+                      data-testid="button-resend-otp"
+                    >
+                      Resend OTP
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="flex-1"
+                      onClick={() => {
+                        setStep("phone");
+                        setOtp("");
+                        setError("");
+                      }}
+                      disabled={loading}
+                      data-testid="button-change-number"
+                    >
+                      Change Number
+                    </Button>
+                  </div>
                 </div>
               </form>
             )}
