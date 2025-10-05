@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SlotCard, Slot } from "./SlotCard";
@@ -6,6 +6,8 @@ import { ThemeToggle } from "./ThemeToggle";
 import { LogOut, Home, Sparkles } from "lucide-react";
 import { motion } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
+import { auth, db } from "@/lib/firebase";
+import { collection, onSnapshot, doc, updateDoc } from "firebase/firestore";
 
 interface DashboardProps {
   user: {
@@ -16,47 +18,81 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
-//todo: remove mock functionality
-const MOCK_SLOTS: Slot[] = [
-  { id: "1", time: "08:00 AM", date: "Today, Oct 2", available: true },
-  { id: "2", time: "10:00 AM", date: "Today, Oct 2", available: true },
-  { id: "3", time: "12:00 PM", date: "Today, Oct 2", available: false, bookedBy: "B-101" },
-  { id: "4", time: "02:00 PM", date: "Today, Oct 2", available: true },
-  { id: "5", time: "04:00 PM", date: "Today, Oct 2", available: false, bookedBy: "C-305" },
-  { id: "6", time: "06:00 PM", date: "Today, Oct 2", available: true },
-  { id: "7", time: "08:00 AM", date: "Tomorrow, Oct 3", available: true },
-  { id: "8", time: "10:00 AM", date: "Tomorrow, Oct 3", available: true },
-];
-
 export function Dashboard({ user, onLogout }: DashboardProps) {
-  //todo: remove mock functionality
-  const [slots, setSlots] = useState<Slot[]>(MOCK_SLOTS);
+  const [slots, setSlots] = useState<Slot[]>([]);
   const [bookingSlotId, setBookingSlotId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "slots"), (snapshot) => {
+      const slotsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Slot[];
+      
+      setSlots(slotsData.sort((a, b) => a.time.localeCompare(b.time)));
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching slots:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load slots. Please refresh the page.",
+        variant: "destructive",
+      });
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [toast]);
 
   const handleBookSlot = async (slotId: string) => {
     setBookingSlotId(slotId);
-    console.log("Booking slot:", slotId);
     
-    // Simulate booking API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    //todo: remove mock functionality - replace with Firebase Firestore update
-    setSlots(prev => 
-      prev.map(slot => 
-        slot.id === slotId 
-          ? { ...slot, available: false, bookedBy: user.room }
-          : slot
-      )
-    );
-    
-    setBookingSlotId(null);
-    
-    toast({
-      title: "Slot Booked Successfully! 🎉",
-      description: `Your laundry slot has been confirmed for ${slots.find(s => s.id === slotId)?.time}`,
-    });
+    try {
+      const slotRef = doc(db, "slots", slotId);
+      await updateDoc(slotRef, {
+        available: false,
+        bookedBy: user.room
+      });
+      
+      const bookedSlot = slots.find(s => s.id === slotId);
+      
+      toast({
+        title: "Slot Booked Successfully! 🎉",
+        description: `Your laundry slot has been confirmed for ${bookedSlot?.time}`,
+      });
+    } catch (error) {
+      console.error("Error booking slot:", error);
+      toast({
+        title: "Booking Failed",
+        description: "Failed to book slot. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setBookingSlotId(null);
+    }
   };
+
+  const handleLogout = async () => {
+    try {
+      await auth.signOut();
+      onLogout();
+    } catch (error) {
+      console.error("Error logging out:", error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-primary border-t-transparent" />
+          <p className="mt-4 text-muted-foreground">Loading slots...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -76,7 +112,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
             <Button
               variant="ghost"
               size="icon"
-              onClick={onLogout}
+              onClick={handleLogout}
               data-testid="button-logout"
             >
               <LogOut className="w-5 h-5" />
@@ -122,16 +158,22 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
-            {slots.map((slot) => (
-              <SlotCard
-                key={slot.id}
-                slot={slot}
-                onBook={handleBookSlot}
-                isBooking={bookingSlotId === slot.id}
-              />
-            ))}
-          </div>
+          {slots.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">No slots available at the moment.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
+              {slots.map((slot) => (
+                <SlotCard
+                  key={slot.id}
+                  slot={slot}
+                  onBook={handleBookSlot}
+                  isBooking={bookingSlotId === slot.id}
+                />
+              ))}
+            </div>
+          )}
         </motion.div>
       </main>
     </div>

@@ -5,6 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sparkles, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
+import { auth, db } from "@/lib/firebase";
+import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { useToast } from "@/hooks/use-toast";
 
 interface PhoneLoginProps {
   onLoginSuccess: (userData: { name: string; phone: string; room: string }) => void;
@@ -16,6 +20,19 @@ export function PhoneLogin({ onLoginSuccess }: PhoneLoginProps) {
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [confirmationResult, setConfirmationResult] = useState<any>(null);
+  const { toast } = useToast();
+
+  const setupRecaptcha = () => {
+    if (!(window as any).recaptchaVerifier) {
+      (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+        'size': 'invisible',
+        'callback': () => {
+          console.log("reCAPTCHA solved");
+        }
+      });
+    }
+  };
 
   const handlePhoneSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,12 +44,31 @@ export function PhoneLogin({ onLoginSuccess }: PhoneLoginProps) {
     }
 
     setLoading(true);
-    console.log("Phone submitted:", phone);
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setLoading(false);
-    setStep("otp");
+    try {
+      setupRecaptcha();
+      const appVerifier = (window as any).recaptchaVerifier;
+      const phoneNumber = `+91${phone}`;
+      
+      const confirmation = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+      setConfirmationResult(confirmation);
+      setStep("otp");
+      
+      toast({
+        title: "OTP Sent",
+        description: `Verification code sent to +91 ${phone}`,
+      });
+    } catch (err: any) {
+      console.error("Error sending OTP:", err);
+      setError(err.message || "Failed to send OTP. Please try again.");
+      
+      if ((window as any).recaptchaVerifier) {
+        (window as any).recaptchaVerifier.clear();
+        (window as any).recaptchaVerifier = null;
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleOtpSubmit = async (e: React.FormEvent) => {
@@ -45,22 +81,45 @@ export function PhoneLogin({ onLoginSuccess }: PhoneLoginProps) {
     }
 
     setLoading(true);
-    console.log("OTP submitted:", otp);
     
-    // Simulate Firebase auth verification and Firestore user lookup
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setLoading(false);
-    
-    // Mock successful authentication with user data
-    onLoginSuccess({
-      name: "Rahul Kumar",
-      phone: phone,
-      room: "A-204"
-    });
+    try {
+      const result = await confirmationResult.confirm(otp);
+      const user = result.user;
+      
+      const userDocRef = doc(db, "users", phone);
+      const userDoc = await getDoc(userDocRef);
+      
+      if (!userDoc.exists()) {
+        setError("User not registered. Please contact admin.");
+        await auth.signOut();
+        setLoading(false);
+        return;
+      }
+      
+      const userData = userDoc.data();
+      
+      onLoginSuccess({
+        name: userData.name,
+        phone: phone,
+        room: userData.room
+      });
+      
+      toast({
+        title: "Login Successful! 🎉",
+        description: `Welcome ${userData.name}`,
+      });
+    } catch (err: any) {
+      console.error("Error verifying OTP:", err);
+      setError("Invalid OTP. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div id="recaptcha-container"></div>
+      
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
