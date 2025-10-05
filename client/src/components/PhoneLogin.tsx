@@ -86,11 +86,17 @@ export function PhoneLogin({ onLoginSuccess }: PhoneLoginProps) {
       const result = await confirmationResult.confirm(otp);
       const user = result.user;
       
+      console.log("Looking for user document with ID:", phone);
       const userDocRef = doc(db, "users", phone);
       const userDoc = await getDoc(userDocRef);
       
+      console.log("Document exists:", userDoc.exists());
+      if (userDoc.exists()) {
+        console.log("User data found:", userDoc.data());
+      }
+      
       if (!userDoc.exists()) {
-        setError("User not registered. Please contact admin.");
+        setError(`User not registered. Make sure document ID is: ${phone}`);
         await auth.signOut();
         setLoading(false);
         return;
